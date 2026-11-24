@@ -1,4 +1,4 @@
-
+import argparse
 import httpx
 import json
 import time
@@ -18,7 +18,7 @@ experiment_id = str(uuid4())
 run_id = str(uuid4())
 
 
-def load_scenario():
+def load_scenario(scenario_id):
     with SCENARIO_FILE.open("r", encoding="utf-8") as file:
         data = json.load(file)
 
@@ -27,15 +27,17 @@ def load_scenario():
     if not scenarios:
         raise ValueError("No scenarios found in JSON file")
 
-    scenario = scenarios[0]
+    for scenario in scenarios:
+        if scenario.get("id") == scenario_id:
+            if scenario.get("intent") != "benign":
+                raise ValueError("Selected scenario is not benign")
 
-    if scenario.get("intent") != "benign":
-        raise ValueError("Selected scenario is not benign")
+            if not scenario.get("actions"):
+                raise ValueError("Scenario has no actions")
 
-    if not scenario.get("actions"):
-        raise ValueError("Scenario has no actions")
+            return scenario
 
-    return scenario
+    raise ValueError(f"Scenario not found: {scenario_id}")
 
 
 def write_event(event):
@@ -93,8 +95,8 @@ def execute_request(client, scenario_id, action):
     return response
 
 
-def execute_scenario():
-    scenario = load_scenario()
+def execute_scenario(scenario_id):
+    scenario = load_scenario(scenario_id)
 
     scenario_id = scenario["id"]
     scenario_name = scenario["name"]
@@ -135,4 +137,18 @@ def execute_scenario():
 
 
 if __name__ == "__main__":
-    execute_scenario()
+    parser = argparse.ArgumentParser(
+        description="Benign Traffic Scenario Executor"
+    )
+
+    parser.add_argument(
+        "scenario_id",
+        help="ID of the scenario to execute"
+    )
+
+    args = parser.parse_args()
+
+    try:
+       execute_scenario(args.scenario_id)
+    except (ValueError, OSError, json.JSONDecodeError) as error:
+       parser.error(str(error))
