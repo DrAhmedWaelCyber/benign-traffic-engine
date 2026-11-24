@@ -4,16 +4,9 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+SCENARIO_FILE = PROJECT_ROOT / "scenarios" / "benign_scenarios.json"
 EXECUTOR_FILE = PROJECT_ROOT / "evidence" / "executor_events.jsonl"
 APPLICATION_FILE = PROJECT_ROOT / "evidence" / "application_events.jsonl"
-
-EXPECTED_STEPS = [
-    "homepage",
-    "products",
-    "product_details",
-    "add_to_cart",
-    "view_cart"
-]
 
 EXPECTED_EVENTS = [
     "homepage_visited",
@@ -51,6 +44,18 @@ def load_jsonl(file_path):
     return records
 
 
+def load_scenario():
+    with SCENARIO_FILE.open("r", encoding="utf-8") as file:
+        data = json.load(file)
+
+    scenarios = data.get("scenarios", [])
+
+    if not scenarios:
+        raise ValueError("No scenarios found")
+
+    return scenarios[0]
+
+
 def get_run_identity(event):
     return (
         event.get("experiment_id"),
@@ -82,7 +87,7 @@ def select_latest_run(executor_events, application_events):
     return selected_executor, selected_application
 
 
-def validate_run(executor_events, application_events):
+def validate_run(executor_events, application_events, scenario):
 
     if executor_events is None or application_events is None:
         return "INCONCLUSIVE", ["Evidence file missing"]
@@ -111,20 +116,43 @@ def validate_run(executor_events, application_events):
     if any(value is None for value in identity):
         return "INCONCLUSIVE", ["Missing correlation identifiers"]
 
-    steps = [
-        event.get("step")
-        for event in executor_events
+    expected_scenario_id = scenario["id"]
+    expected_actions = scenario["actions"]
+
+    expected_action_ids = [
+        action["action_id"] for action in expected_actions
     ]
+
+    actual_action_ids = [
+        event.get("action_id") for event in executor_events
+    ]
+
+    if actual_action_ids != expected_action_ids:
+        return "FAIL", [
+            "Executor actions do not match scenario definition"
+        ]
+
+    if any(
+        event.get("scenario_id") != expected_scenario_id
+        for event in executor_events
+    ):
+        return "FAIL", [
+            "Scenario ID mismatch"
+        ]
+
+    for event, action in zip(executor_events, expected_actions):
+        if (
+            event.get("method") != action["method"].upper()
+            or event.get("endpoint") != action["endpoint"]
+        ):
+            return "FAIL", [
+                f"Request details mismatch for {action['action_id']}"
+            ]
 
     events = [
         event.get("event_type")
         for event in application_events
     ]
-
-    if steps != EXPECTED_STEPS:
-        return "FAIL", [
-            "Executor steps do not match expected sequence"
-        ]
 
     if events != EXPECTED_EVENTS:
         return "FAIL", [
@@ -158,14 +186,18 @@ def validate_run(executor_events, application_events):
 
 
 def main():
+    selected_executor = []
+    selected_application = []
+
     try:
+        scenario = load_scenario()
+
         executor_events = load_jsonl(EXECUTOR_FILE)
         application_events = load_jsonl(APPLICATION_FILE)
 
         if executor_events is None or application_events is None:
             status = "INCONCLUSIVE"
             reasons = ["Evidence file missing"]
-            selected_executor = []
 
         else:
             selected_executor, selected_application = select_latest_run(
@@ -180,29 +212,21 @@ def main():
             else:
                 status, reasons = validate_run(
                     selected_executor,
-                    selected_application
+                    selected_application,
+                    scenario
                 )
 
-    except (ValueError, RuntimeError) as error:
+    except (ValueError, RuntimeError, OSError, KeyError) as error:
         status = "INCONCLUSIVE"
         reasons = [str(error)]
-        selected_executor = []
 
     print("\n=== BENIGN TRAFFIC VALIDATION ===")
 
     if selected_executor:
-        print(
-            f"Selected Run: "
-            f"{selected_executor[0].get('run_id')}"
-        )
-
-        print(
-            f"Executor Events: {len(selected_executor)}"
-        )
-
-        print(
-            f"Application Events: {len(selected_application)}"
-        )
+        print(f"Scenario: {selected_executor[0].get('scenario_id')}")
+        print(f"Selected Run: {selected_executor[0].get('run_id')}")
+        print(f"Executor Events: {len(selected_executor)}")
+        print(f"Application Events: {len(selected_application)}")
 
     print(f"Status: {status}")
 

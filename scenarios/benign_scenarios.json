@@ -1,0 +1,49 @@
+
+{
+    "scenarios": [
+        {
+            "id": "SCN-B001",
+            "name": "Normal Shopping Behavior",
+            "intent": "benign",
+            "actions": [
+                {
+                    "action_id": "ACT-001",
+                    "method": "GET",
+                    "endpoint": "/",
+                    "params": {},
+                    "payload": null
+                },
+                {
+                    "action_id": "ACT-002",
+                    "method": "GET",
+                    "endpoint": "/products",
+                    "params": {},
+                    "payload": null
+                },
+                {
+                    "action_id": "ACT-003",
+                    "method": "GET",
+                    "endpoint": "/products/1",
+                    "params": {},
+                    "payload": null
+                },
+                {
+                    "action_id": "ACT-004",
+                    "method": "POST",
+                    "endpoint": "/cart",
+                    "params": {
+                        "product_id": 1
+                    },
+                    "payload": null
+                },
+                {
+                    "action_id": "ACT-005",
+                    "method": "GET",
+                    "endpoint": "/cart",
+                    "params": {},
+                    "payload": null
+                }
+            ]
+        }
+    ]
+}

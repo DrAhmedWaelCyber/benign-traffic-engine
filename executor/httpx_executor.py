@@ -10,10 +10,32 @@ from pathlib import Path
 BASE_URL = "http://127.0.0.1:8000"
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+SCENARIO_FILE = PROJECT_ROOT / "scenarios" / "benign_scenarios.json"
 EVIDENCE_FILE = PROJECT_ROOT / "evidence" / "executor_events.jsonl"
 
 experiment_id = str(uuid4())
 run_id = str(uuid4())
+
+
+def load_scenario():
+    with SCENARIO_FILE.open("r", encoding="utf-8") as file:
+        data = json.load(file)
+
+    scenarios = data.get("scenarios", [])
+
+    if not scenarios:
+        raise ValueError("No scenarios found in JSON file")
+
+    scenario = scenarios[0]
+
+    if scenario.get("intent") != "benign":
+        raise ValueError("Selected scenario is not benign")
+
+    if not scenario.get("actions"):
+        raise ValueError("Scenario has no actions")
+
+    return scenario
 
 
 def write_event(event):
@@ -21,13 +43,29 @@ def write_event(event):
         file.write(json.dumps(event) + "\n")
 
 
-def execute_request(client, step, method, endpoint, **kwargs):
+def execute_request(client, scenario_id, action):
+    action_id = action["action_id"]
+    method = action["method"].upper()
+    endpoint = action["endpoint"]
+
+    request_kwargs = {
+        "params": action.get("params") or {}
+    }
+
+    payload = action.get("payload")
+
+    if payload is not None:
+        if isinstance(payload, (dict, list)):
+            request_kwargs["json"] = payload
+        else:
+            request_kwargs["content"] = str(payload)
+
     start_time = time.perf_counter()
 
     response = client.request(
         method,
         endpoint,
-        **kwargs
+        **request_kwargs
     )
 
     duration_ms = round(
@@ -39,7 +77,8 @@ def execute_request(client, step, method, endpoint, **kwargs):
         "experiment_id": experiment_id,
         "run_id": run_id,
         "session_id": client.cookies.get("session_id"),
-        "step": step,
+        "scenario_id": scenario_id,
+        "action_id": action_id,
         "method": method,
         "endpoint": endpoint,
         "status_code": response.status_code,
@@ -49,53 +88,47 @@ def execute_request(client, step, method, endpoint, **kwargs):
 
     write_event(event)
 
-    print(f"{step}: {response.status_code}")
+    print(f"{action_id}: {response.status_code}")
 
     return response
 
 
 def execute_scenario():
-    print("Starting Benign Traffic Scenario")
+    scenario = load_scenario()
+
+    scenario_id = scenario["id"]
+    scenario_name = scenario["name"]
+    actions = scenario["actions"]
+
+    print(f"Starting Scenario: {scenario_name}")
+    print(f"Scenario ID: {scenario_id}")
 
     with httpx.Client(
-    base_url=BASE_URL,
-    timeout=10.0,
-    headers={
-        "X-Experiment-ID": experiment_id,
-        "X-Run-ID": run_id
-    }
+        base_url=BASE_URL,
+        timeout=10.0,
+        headers={
+            "X-Experiment-ID": experiment_id,
+            "X-Run-ID": run_id
+        }
     ) as client:
 
-        execute_request(
-            client, "homepage", "GET", "/"
-        )
+        last_response = None
 
-        time.sleep(1)
+        for index, action in enumerate(actions):
+            last_response = execute_request(
+                client,
+                scenario_id,
+                action
+            )
 
-        execute_request(
-            client, "products", "GET", "/products"
-        )
+            if index < len(actions) - 1:
+                time.sleep(1)
 
-        time.sleep(2)
+        if last_response is not None:
+            print("Last response status:", last_response.status_code)
 
-        execute_request(
-            client, "product_details", "GET", "/products/1"
-        )
-
-        time.sleep(1)
-
-        execute_request(
-            client, "add_to_cart", "POST", "/cart",
-            params={"product_id": 1}
-        )
-
-        time.sleep(1)
-
-        cart_response = execute_request(
-            client, "view_cart", "GET", "/cart"
-        )
-
-        print("Cart content:", cart_response.json())
+            if actions[-1]["endpoint"] == "/cart":
+                print("Cart content:", last_response.json())
 
     print(f"Evidence saved to: {EVIDENCE_FILE}")
     print("Scenario completed")
