@@ -34,7 +34,17 @@
             "page": "services"
           },
           "payload": null
-        }
+        },
+        {
+          "action_id": "ACT-004",
+          "method": "GET",
+          "endpoint": "/index.php",
+          "intent": "view_contact_page",
+          "params": {
+            "page": "contact"
+          },
+          "payload": null
+      }
       ]
     },
     {
