@@ -6,21 +6,18 @@ The project is part of the University Cyber Range
 
 ## Project Files
 
-- `target_app/` – Local web application.
-- `executor/` – Sends HTTP requests using HTTPX.
-- `validator/` – Checks the generated evidence.
-- `evidence/` – Stores JSONL files.
+- `target_app/` – Local web application > DONE
+- `executor/` – Sends HTTP requests using HTTPX > DONE 
+- `validator/` – Checks the generated evidence > STILL BROOOOOO  
+- `evidence/` – Stores JSONL files > DONE 
 
 ## Setup
 
 ```bash
-git clone https://github.com/DrAhmedWaelCyber/benign-traffic-engine.git
-cd benign-traffic-engine
 
 python3 -m venv .venv
 source .venv/bin/activate
 
-pip install -r requirements.txt
 ```
 
 ## Run
@@ -34,6 +31,5 @@ uvicorn target_app.app:app --reload
 run:
 
 ```bash
-source .venv/bin/activate
 python executor/httpx_executor.py
 ```
