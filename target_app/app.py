@@ -11,21 +11,38 @@ app = FastAPI(title="Benign Traffic Target Application")
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 LOG_FILE = PROJECT_ROOT / "evidence" / "application_events.jsonl"
 
-PRODUCTS = [
-    {"id": 1, "name": "Laptop", "price": 25000},
-    {"id": 2, "name": "Keyboard", "price": 1200},
-    {"id": 3, "name": "Mouse", "price": 600},
-]
+VALID_PAGES = {
+    "home",
+    "about",
+    "services",
+    "contact"
+}
 
-CARTS = {}
+USERS = {
+    101: {"user_id": 101, "name": "Ahmed"},
+    102: {"user_id": 102, "name": "Mohamed"},
+    103: {"user_id": 103, "name": "Ali"}
+}
+
+# Maps each session to its authenticated user.
+SESSION_USERS = {}
 
 
 def log_application_event(request, event_type, details=None):
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+
     event = {
         "event_id": str(uuid4()),
         "experiment_id": request.headers.get("X-Experiment-ID"),
         "run_id": request.headers.get("X-Run-ID"),
+        "scenario_id": request.headers.get("X-Scenario-ID"),
+        "action_id": request.headers.get("X-Action-ID"),
         "session_id": request.state.session_id,
+        "simulation_mode": request.headers.get("X-Simulation-Mode"),
+        "intent": request.headers.get("X-Intent"),
+        "method": request.method,
+        "endpoint": request.url.path,
+        "query_params": dict(request.query_params),
         "event_type": event_type,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "details": details or {}
@@ -44,6 +61,9 @@ async def manage_session(request: Request, call_next):
 
     request.state.session_id = session_id
 
+    # Assign a user to this session if it is new.
+    SESSION_USERS.setdefault(session_id, 101)
+
     response = await call_next(request)
 
     response.set_cookie(
@@ -56,105 +76,87 @@ async def manage_session(request: Request, call_next):
     return response
 
 
-@app.get("/")
-async def homepage(request: Request):
-    log_application_event(request, "homepage_visited")
-
-    return {
-        "message": "Welcome to our store",
-        "session_id": request.state.session_id
-    }
-
-
-@app.get("/products")
-async def get_products(request: Request):
-    log_application_event(
-        request,
-        "products_list_viewed",
-        {"products_count": len(PRODUCTS)}
-    )
-
-    return {"products": PRODUCTS}
-
-
-@app.get("/products/{product_id}")
-async def get_product(product_id: int, request: Request):
-    product = next(
-        (p for p in PRODUCTS if p["id"] == product_id),
-        None
-    )
-
-    if product is None:
+@app.get("/index.php")
+async def navigate_page(request: Request, page: str):
+    if page not in VALID_PAGES:
         log_application_event(
             request,
-            "product_not_found",
-            {"product_id": product_id}
+            "invalid_page_requested",
+            {"page": page}
         )
 
         return JSONResponse(
             status_code=404,
-            content={"error": "Product not found"}
+            content={"error": "Page not found"}
         )
 
     log_application_event(
         request,
-        "product_viewed",
-        {"product_id": product_id}
+        "page_viewed",
+        {"page": page}
     )
 
-    return {"product": product}
+    return {
+        "message": "Page loaded successfully",
+        "page": page
+    }
 
 
-@app.post("/cart")
-async def add_to_cart(request: Request, product_id: int):
+@app.get("/api/v1/users/me")
+async def get_current_user(request: Request):
     session_id = request.state.session_id
+    user_id = SESSION_USERS[session_id]
 
-    product = next(
-        (p for p in PRODUCTS if p["id"] == product_id),
-        None
+    user = USERS[user_id]
+
+    log_application_event(
+        request,
+        "current_user_retrieved",
+        {"user_id": user_id}
     )
 
-    if product is None:
+    return user
+
+
+@app.get("/api/v1/profile")
+async def get_profile(request: Request, user_id: int):
+    session_id = request.state.session_id
+    current_user_id = SESSION_USERS[session_id]
+
+    # Benign prototype: only allow access to the current user's profile.
+    if user_id != current_user_id:
         log_application_event(
             request,
-            "cart_add_failed",
-            {"product_id": product_id}
+            "profile_access_denied",
+            {
+                "requested_user_id": user_id,
+                "current_user_id": current_user_id
+            }
+        )
+
+        return JSONResponse(
+            status_code=403,
+            content={"error": "Access denied"}
+        )
+
+    user = USERS.get(user_id)
+
+    if user is None:
+        log_application_event(
+            request,
+            "profile_not_found",
+            {"user_id": user_id}
         )
 
         return JSONResponse(
             status_code=404,
-            content={"error": "Product not found"}
+            content={"error": "User not found"}
         )
 
-    CARTS.setdefault(session_id, []).append(product)
-
     log_application_event(
         request,
-        "product_added_to_cart",
-        {"product_id": product_id}
+        "profile_viewed",
+        {"user_id": user_id}
     )
 
-    return {
-        "message": "Product added to cart",
-        "cart": CARTS[session_id]
-    }
-
-
-@app.get("/cart")
-async def get_cart(request: Request):
-    session_id = request.state.session_id
-    cart = CARTS.get(session_id, [])
-
-    log_application_event(
-        request,
-        "cart_viewed",
-        {
-            "items_count": len(cart),
-            "product_ids": [item["id"] for item in cart]
-        }
-    )
-
-    return {
-        "session_id": session_id,
-        "cart": cart
-    }
+    return {"profile": user}

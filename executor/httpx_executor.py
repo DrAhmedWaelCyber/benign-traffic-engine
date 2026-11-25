@@ -1,3 +1,4 @@
+
 import argparse
 import httpx
 import json
@@ -41,20 +42,83 @@ def load_scenario(scenario_id):
 
 
 def write_event(event):
+    EVIDENCE_FILE.parent.mkdir(parents=True, exist_ok=True)
+
     with EVIDENCE_FILE.open("a", encoding="utf-8") as file:
         file.write(json.dumps(event) + "\n")
 
 
-def execute_request(client, scenario_id, action):
+def resolve_value(value, context):
+    if isinstance(value, str) and value.startswith("$context."):
+        key = value.removeprefix("$context.")
+
+        if key not in context:
+            raise ValueError(f"Context variable not found: {key}")
+
+        return context[key]
+
+    if isinstance(value, dict):
+        return {
+            key: resolve_value(item, context)
+            for key, item in value.items()
+        }
+
+    if isinstance(value, list):
+        return [
+            resolve_value(item, context)
+            for item in value
+        ]
+
+    return value
+
+
+def extract_response_value(response, json_path):
+    if not json_path.startswith("$."):
+        raise ValueError(f"Unsupported JSON path: {json_path}")
+
+    data = response.json()
+    keys = json_path[2:].split(".")
+
+    for key in keys:
+        if not isinstance(data, dict) or key not in data:
+            raise ValueError(
+                f"Response field not found: {json_path}"
+            )
+
+        data = data[key]
+
+    return data
+
+
+def execute_request(
+    client,
+    scenario_id,
+    action,
+    session_id,
+    context
+):
     action_id = action["action_id"]
     method = action["method"].upper()
     endpoint = action["endpoint"]
 
-    request_kwargs = {
-        "params": action.get("params") or {}
-    }
+    params = resolve_value(
+        action.get("params") or {},
+        context
+    )
 
-    payload = action.get("payload")
+    payload = resolve_value(
+        action.get("payload"),
+        context
+    )
+
+    request_kwargs = {
+        "params": params,
+        "headers": {
+            "X-Scenario-ID": scenario_id,
+            "X-Action-ID": action_id,
+            "X-Intent": action.get("intent", "unspecified")
+        }
+    }
 
     if payload is not None:
         if isinstance(payload, (dict, list)):
@@ -78,11 +142,12 @@ def execute_request(client, scenario_id, action):
     event = {
         "experiment_id": experiment_id,
         "run_id": run_id,
-        "session_id": client.cookies.get("session_id"),
+        "session_id": session_id,
         "scenario_id": scenario_id,
         "action_id": action_id,
         "method": method,
         "endpoint": endpoint,
+        "params": params,
         "status_code": response.status_code,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "duration_ms": duration_ms
@@ -91,6 +156,17 @@ def execute_request(client, scenario_id, action):
     write_event(event)
 
     print(f"{action_id}: {response.status_code}")
+
+    save_response = action.get("save_response")
+
+    if save_response:
+        for variable, json_path in save_response.items():
+            context[variable] = extract_response_value(
+                response,
+                json_path
+            )
+
+            print(f"Saved context variable: {variable}")
 
     return response
 
@@ -102,15 +178,23 @@ def execute_scenario(scenario_id):
     scenario_name = scenario["name"]
     actions = scenario["actions"]
 
+    session_id = str(uuid4())
+    context = {}
+
     print(f"Starting Scenario: {scenario_name}")
     print(f"Scenario ID: {scenario_id}")
+    print(f"Session ID: {session_id}")
 
     with httpx.Client(
         base_url=BASE_URL,
         timeout=10.0,
+        cookies={
+            "session_id": session_id
+        },
         headers={
             "X-Experiment-ID": experiment_id,
-            "X-Run-ID": run_id
+            "X-Run-ID": run_id,
+            "X-Simulation-Mode": "secure"
         }
     ) as client:
 
@@ -120,7 +204,9 @@ def execute_scenario(scenario_id):
             last_response = execute_request(
                 client,
                 scenario_id,
-                action
+                action,
+                session_id,
+                context
             )
 
             if index < len(actions) - 1:
@@ -128,9 +214,6 @@ def execute_scenario(scenario_id):
 
         if last_response is not None:
             print("Last response status:", last_response.status_code)
-
-            if actions[-1]["endpoint"] == "/cart":
-                print("Cart content:", last_response.json())
 
     print(f"Evidence saved to: {EVIDENCE_FILE}")
     print("Scenario completed")
@@ -149,6 +232,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     try:
-       execute_scenario(args.scenario_id)
-    except (ValueError, OSError, json.JSONDecodeError) as error:
-       parser.error(str(error))
+        execute_scenario(args.scenario_id)
+    except (
+        ValueError,
+        OSError,
+        json.JSONDecodeError,
+        httpx.HTTPError
+    ) as error:
+        parser.error(str(error))
