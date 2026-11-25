@@ -1,8 +1,8 @@
 # Benign Traffic Engine
 
-A local prototype for generating normal user traffic and checking if the expected actions happened correctly.
+A local prototype for generating normal user traffic and checking if the expected actions happened correctly
 
-The project is part of the University Cyber Range.
+The project is part of the University Cyber Range
 
 ## Project Files
 
@@ -25,29 +25,15 @@ pip install -r requirements.txt
 
 ## Run
 
-Start the application:
+Start the PythonApp:
 
 ```bash
 uvicorn target_app.app:app --reload
 ```
 
-Open another terminal and run:
+run:
 
 ```bash
 source .venv/bin/activate
 python executor/httpx_executor.py
 ```
-
-After execution, run the validator:
-
-```bash
-python validator/validator.py
-```
-
-## Current Status
-
-Version: `v0.1.0`
-
-The local scenario performs five actions: homepage visit, products view, product view, add to cart, and view cart.
-
-The prototype currently works locally. Official Cyber Range integration is not implemented yet.
